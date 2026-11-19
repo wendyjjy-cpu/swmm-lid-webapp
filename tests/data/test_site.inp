@@ -1,0 +1,163 @@
+[TITLE]
+;;Synthetic test site (US units) used only for automated tests before the
+;;EPA SWMM Applications Manual Example 2 file is available.
+
+[OPTIONS]
+FLOW_UNITS           CFS
+INFILTRATION         HORTON
+FLOW_ROUTING         DYNWAVE
+START_DATE           01/01/2007
+START_TIME           00:00:00
+REPORT_START_DATE    01/01/2007
+REPORT_START_TIME    00:00:00
+END_DATE             01/01/2007
+END_TIME             12:00:00
+DRY_DAYS             5
+REPORT_STEP          00:01:00
+WET_STEP             00:01:00
+DRY_STEP             01:00:00
+ROUTING_STEP         0:00:05
+ALLOW_PONDING        NO
+INERTIAL_DAMPING     PARTIAL
+VARIABLE_STEP        0.75
+LENGTHENING_STEP     0
+MIN_SURFAREA         0
+NORMAL_FLOW_LIMITED  BOTH
+SKIP_STEADY_STATE    NO
+FORCE_MAIN_EQUATION  H-W
+LINK_OFFSETS         DEPTH
+MIN_SLOPE            0
+
+[RAINGAGES]
+;;Name           Format    Interval SCF      Source
+RG1              INTENSITY 0:05     1.0      TIMESERIES 10-yr
+
+[SUBCATCHMENTS]
+;;Name           Rain Gage        Outlet           Area     %Imperv  Width    %Slope   CurbLen
+S1               RG1              J1               4.5      45       640      2.0      0
+S2               RG1              J2               3.2      55       480      1.5      0
+S3               RG1              J3               5.1      38       700      2.0      0
+S4               RG1              J4               2.4      70       390      1.0      0
+
+[SUBAREAS]
+;;Subcatchment   N-Imperv   N-Perv     S-Imperv   S-Perv     PctZero    RouteTo
+S1               0.015      0.24       0.06       0.3        25         OUTLET
+S2               0.015      0.24       0.06       0.3        25         OUTLET
+S3               0.015      0.24       0.06       0.3        25         OUTLET
+S4               0.015      0.24       0.06       0.3        25         OUTLET
+
+[INFILTRATION]
+;;Subcatchment   MaxRate    MinRate    Decay      DryTime    MaxInfil
+S1               4.5        0.2        6.5        7          0
+S2               4.5        0.2        6.5        7          0
+S3               4.5        0.2        6.5        7          0
+S4               4.5        0.2        6.5        7          0
+
+[JUNCTIONS]
+;;Name           Elevation  MaxDepth   InitDepth  SurDepth   Aponded
+J1               4990       3          0          0          0
+J2               4985       3          0          0          0
+J3               4980       3          0          0          0
+J4               4972       3          0          0          0
+
+[OUTFALLS]
+;;Name           Elevation  Type       Stage Data       Gated    Route To
+O1               4965       FREE                        NO
+
+[CONDUITS]
+;;Name           From Node        To Node          Length     Roughness  InOffset   OutOffset  InitFlow   MaxFlow
+C1               J1               J2               400        0.05       0          0          0          0
+C2               J2               J3               450        0.05       0          0          0          0
+C3               J3               J4               500        0.016      0          0          0          0
+C4               J4               O1               300        0.016      0          0          0          0
+
+[XSECTIONS]
+;;Link           Shape        Geom1            Geom2      Geom3      Geom4      Barrels    Culvert
+C1               TRAPEZOIDAL  2.5              5          4          4          1
+C2               TRAPEZOIDAL  2.5              5          4          4          1
+C3               CIRCULAR     2.0              0          0          0          1          4
+C4               CIRCULAR     2.5              0          0          0          1          4
+
+[TIMESERIES]
+;;Name           Date       Time       Value
+2-yr                        0:00       0.30
+2-yr                        0:05       0.60
+2-yr                        0:10       1.20
+2-yr                        0:15       2.40
+2-yr                        0:20       1.80
+2-yr                        0:25       0.90
+2-yr                        0:30       0.50
+2-yr                        0:35       0.30
+2-yr                        0:40       0.20
+2-yr                        0:45       0.10
+2-yr                        0:50       0.00
+;
+10-yr                       0:00       0.50
+10-yr                       0:05       1.00
+10-yr                       0:10       2.00
+10-yr                       0:15       4.00
+10-yr                       0:20       3.00
+10-yr                       0:25       1.50
+10-yr                       0:30       0.80
+10-yr                       0:35       0.50
+10-yr                       0:40       0.30
+10-yr                       0:45       0.15
+10-yr                       0:50       0.00
+;
+100-yr                      0:00       0.80
+100-yr                      0:05       1.60
+100-yr                      0:10       3.20
+100-yr                      0:15       6.40
+100-yr                      0:20       4.80
+100-yr                      0:25       2.40
+100-yr                      0:30       1.30
+100-yr                      0:35       0.80
+100-yr                      0:40       0.50
+100-yr                      0:45       0.25
+100-yr                      0:50       0.00
+
+[REPORT]
+;;Reporting Options
+INPUT      NO
+CONTROLS   NO
+SUBCATCHMENTS ALL
+NODES ALL
+LINKS ALL
+
+[MAP]
+DIMENSIONS 0.000 0.000 10000.000 10000.000
+Units      None
+
+[COORDINATES]
+;;Node           X-Coord            Y-Coord
+J1               1000.000           8000.000
+J2               3000.000           7000.000
+J3               5000.000           5500.000
+J4               7000.000           4000.000
+O1               9000.000           2500.000
+
+[VERTICES]
+;;Link           X-Coord            Y-Coord
+
+[Polygons]
+;;Subcatchment   X-Coord            Y-Coord
+S1               0.000              10000.000
+S1               2500.000           10000.000
+S1               2500.000           7500.000
+S1               0.000              7500.000
+S2               2500.000           9000.000
+S2               4500.000           9000.000
+S2               4500.000           6500.000
+S2               2500.000           6500.000
+S3               4500.000           7500.000
+S3               7000.000           7500.000
+S3               7000.000           4500.000
+S3               4500.000           4500.000
+S4               6000.000           4500.000
+S4               8500.000           4500.000
+S4               8500.000           2000.000
+S4               6000.000           2000.000
+
+[SYMBOLS]
+;;Gage           X-Coord            Y-Coord
+RG1              500.000            9500.000

@@ -1,0 +1,42 @@
+# 기준 결과표: EPA SWMM 응용 매뉴얼(Gironás et al., 2009, EPA/600/R-09/000)의 결과표 값.
+# model = models 폴더의 INP 파일 이름, storm = INP의 강우 시계열 이름, routing = 흐름 추적 방법
+# metric = peak_outflow | outflow_volume | runoff_coeff | runoff_depth | precip_depth |
+#          max_full_flow:<관로> | max_full_depth:<관로> | max_flow:<관로> | node_max_depth:<절점>
+# value = 모형 단위 그대로(CFS, in, 비율), 매뉴얼 표의 반올림 자릿수 그대로 옮김
+model,storm,metric,value,unit,source,routing
+Example2-Post.inp,2-yr,precip_depth,0.98,in,응용 매뉴얼 표 2-7 (DW),DYNWAVE
+Example2-Post.inp,2-yr,runoff_depth,0.53,in,응용 매뉴얼 표 2-7 (DW),DYNWAVE
+Example2-Post.inp,2-yr,runoff_coeff,0.545,-,응용 매뉴얼 표 2-7 (DW),DYNWAVE
+Example2-Post.inp,2-yr,peak_outflow,33.4,CFS,응용 매뉴얼 표 2-7 (DW),DYNWAVE
+Example2-Post.inp,10-yr,precip_depth,1.71,in,응용 매뉴얼 표 2-7 (DW),DYNWAVE
+Example2-Post.inp,10-yr,runoff_depth,1.11,in,응용 매뉴얼 표 2-7 (DW),DYNWAVE
+Example2-Post.inp,10-yr,runoff_coeff,0.647,-,응용 매뉴얼 표 2-7 (DW),DYNWAVE
+Example2-Post.inp,10-yr,peak_outflow,62.2,CFS,응용 매뉴얼 표 2-7 (DW),DYNWAVE
+Example2-Post.inp,100-yr,precip_depth,3.67,in,응용 매뉴얼 표 2-7 (DW),DYNWAVE
+Example2-Post.inp,100-yr,runoff_depth,3.04,in,응용 매뉴얼 표 2-7 (DW),DYNWAVE
+Example2-Post.inp,100-yr,runoff_coeff,0.827,-,응용 매뉴얼 표 2-7 (DW),DYNWAVE
+Example2-Post.inp,100-yr,peak_outflow,164.1,CFS,응용 매뉴얼 표 2-7 (DW),DYNWAVE
+Example2-Post.inp,2-yr,peak_outflow,46.74,CFS,"응용 매뉴얼 표 1-9 (경로추적 없음 = 월류 없을 때 정상류와 동일, 2.4절)",STEADY
+Example2-Post.inp,10-yr,peak_outflow,82.64,CFS,"응용 매뉴얼 표 1-9 (경로추적 없음 = 월류 없을 때 정상류와 동일, 2.4절)",STEADY
+Example2-Post.inp,100-yr,max_full_depth:C1,0.37,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_flow:C1,0.11,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_depth:C2,0.96,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_flow:C2,0.94,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_depth:C3,0.7,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_flow:C3,0.83,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_depth:C4,0.38,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_flow:C4,0.12,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_depth:C5,0.67,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_flow:C5,0.41,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_depth:C6,0.44,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_flow:C6,0.16,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_depth:C7,0.71,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_flow:C7,0.85,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_depth:C8,0.7,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_flow:C8,0.44,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_depth:C9,0.88,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_flow:C9,0.76,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_depth:C10,0.88,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_flow:C10,0.74,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_depth:C11,0.78,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
+Example2-Post.inp,100-yr,max_full_flow:C11,0.95,-,"응용 매뉴얼 표 2-6 (KW, 100년)",KINWAVE
