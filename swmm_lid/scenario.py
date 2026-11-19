@@ -41,11 +41,19 @@ class ScenarioConfig:
 
     def label(self) -> str:
         rt = f" · {self.routing}" if self.routing else ""
-        if not self.lid.enabled or not self.lid.targets or self.lid.apply_pct <= 0:
+        if not self.lid.active():
             return f"{self.storm_label()} · LID 없음{rt}"
+        items = self.lid.items()
+        if self.lid.is_mixed:
+            kinds = "·".join(LID_TYPES[t]["short"] for t in self.lid.used_types())
+            rates = [r_ for _, _, r_ in items]
+            rate_s = (f"{rates[0]:.0f}%" if max(rates) - min(rates) < 1e-9
+                      else f"{min(rates):.0f}~{max(rates):.0f}%")
+            return (f"{self.storm_label()} · 혼합({kinds}) {rate_s} · 소유역 {len(items)}곳 · "
+                    f"막힘 {self.lid.clog_pct:.0f}%{rt}")
         lt = LID_TYPES[self.lid.lid_type]["short"]
         return (f"{self.storm_label()} · {lt} {self.lid.apply_pct:.0f}% · "
-                f"소유역 {len(self.lid.targets)}곳 · 막힘 {self.lid.clog_pct:.0f}%{rt}")
+                f"소유역 {len(items)}곳 · 막힘 {self.lid.clog_pct:.0f}%{rt}")
 
 
 def _hours(s: str) -> float:
@@ -221,11 +229,15 @@ def compare_to_baseline(res: ScenarioResult, base: ScenarioResult) -> dict:
     def red(x, y):
         return (1 - x / y) * 100.0 if y and not math.isnan(y) and not math.isnan(x) else math.nan
 
+    ha = k.get("lid_area_ha") or 0.0
     return {
         "peak_reduction_pct": red(k["peak_flow_cms"], b["peak_flow_cms"]),
         "volume_reduction_pct": red(k["outflow_vol_m3"], b["outflow_vol_m3"]),
         "peak_delay_min": k["peak_time_min"] - b["peak_time_min"],
         "capacity_change": k["max_capacity"] - b["max_capacity"],
+        # LID 면적 1 ha당 저감량 (배치·종류를 같은 LID 면적 기준으로 비교)
+        "vol_red_m3_per_ha": (b["outflow_vol_m3"] - k["outflow_vol_m3"]) / ha if ha > 0 else math.nan,
+        "peak_red_lps_per_ha": (b["peak_flow_cms"] - k["peak_flow_cms"]) * 1000 / ha if ha > 0 else math.nan,
     }
 
 
@@ -240,7 +252,9 @@ def lid_balance_table(res: ScenarioResult) -> pd.DataFrame:
         d = {k: m.depth_to_mm(r[k]) for k in ("inflow", "evap", "infil", "surface_outflow",
                                               "drain_outflow", "initial_storage", "final_storage")}
         rows.append({
-            "소유역": r["subcatchment"], "LID": r["lid"], "LID 면적(m²)": a_m2,
+            "소유역": r["subcatchment"],
+            "LID": LID_TYPES.get(r["lid"].replace("LID_", ""), {}).get("short", r["lid"]),
+            "LID 면적(m²)": a_m2,
             "유입(mm)": d["inflow"], "증발(mm)": d["evap"], "침투(mm)": d["infil"],
             "표면 월류(mm)": d["surface_outflow"], "유공관 배수(mm)": d["drain_outflow"],
             "최종 저류(mm)": d["final_storage"], "유입 부피(m³)": d["inflow"] / 1000 * a_m2,

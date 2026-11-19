@@ -70,12 +70,51 @@ class LidConfig:
     clog_pct: float = 0.0                 # 막힘에 따른 투수능 감소율 (%)
     params: dict | None = None            # None이면 DEFAULT_PARAMS
     seepage_mmhr: float | None = None     # 원지반 침투율, None이면 모형에서 계산
+    assign: dict | None = None            # 소유역별 설정 {소유역: [LID 종류, 적용률(%)]} (혼합 배치)
 
+    @property
+    def is_mixed(self) -> bool:
+        return bool(self.assign)
+
+    def items(self) -> list[tuple[str, str, float]]:
+        """(소유역, LID 종류, 적용률 %) 목록. 혼합 배치면 assign, 아니면 targets 전체에 같은 종류."""
+        if self.assign:
+            out = []
+            for sub, v in self.assign.items():
+                if v and len(v) >= 2 and v[0] in LID_TYPES and float(v[1]) > 0:
+                    out.append((sub, v[0], float(v[1])))
+            return out
+        if self.apply_pct <= 0:
+            return []
+        return [(sub, self.lid_type, float(self.apply_pct)) for sub in self.targets]
+
+    def active(self) -> bool:
+        return bool(self.enabled and self.items())
+
+    def used_types(self) -> list[str]:
+        seen = []
+        for _, t, _ in self.items():
+            if t not in seen:
+                seen.append(t)
+        return seen
+
+    def params_for(self, t: str) -> dict:
+        """사용자 설계값(고급 설정)은 '한 종류 일괄 적용'에서 그 종류에만 쓰고, 나머지는 기본값."""
+        if self.params and not self.assign and t == self.lid_type:
+            return copy.deepcopy(self.params)
+        return copy.deepcopy(DEFAULT_PARAMS[t])
+
+    def sizing_for(self, t: str) -> float:
+        if self.sizing_pct is not None and not self.assign and t == self.lid_type:
+            return self.sizing_pct
+        return LID_TYPES[t]["sizing"]
+
+    # 이전 코드 호환
     def resolved_params(self) -> dict:
-        return copy.deepcopy(self.params or DEFAULT_PARAMS[self.lid_type])
+        return self.params_for(self.lid_type)
 
     def resolved_sizing(self) -> float:
-        return self.sizing_pct if self.sizing_pct is not None else LID_TYPES[self.lid_type]["sizing"]
+        return self.sizing_for(self.lid_type)
 
 
 def native_seepage_mmhr(model: Model) -> float:
@@ -85,13 +124,19 @@ def native_seepage_mmhr(model: Model) -> float:
     return model.depth_to_mm(rate)
 
 
+def lid_name(t: str) -> str:
+    return f"LID_{t}"
+
+
 # ------------------------------------------------------------ INP 줄 만들기
-def lid_control_rows(model: Model, cfg: LidConfig, name: str) -> list[list]:
-    p = cfg.resolved_params()
+def lid_control_rows(model: Model, cfg: LidConfig, t: str | None = None,
+                     name: str | None = None) -> list[list]:
+    t = t or cfg.lid_type
+    name = name or lid_name(t)
+    p = cfg.params_for(t)
     keep = 1.0 - cfg.clog_pct / 100.0          # 막힘 후 남는 투수능 비율
     d = model.mm_to_depth                       # mm → 모형 깊이 단위
     seep = cfg.seepage_mmhr if cfg.seepage_mmhr is not None else native_seepage_mmhr(model)
-    t = cfg.lid_type
     rows: list[list] = [[name, t]]
     s = p["surface"]
     rows.append([name, "SURFACE", d(s["berm_mm"]), s["veg_frac"], s["n"], s["slope"], s["side"]])
@@ -119,17 +164,19 @@ class LidPlacement:
     new_imperv_pct: float
     new_width: float
     clipped: bool
+    lid_type: str = "BC"
+    apply_pct: float = 0.0
 
 
 def plan_placements(model: Model, cfg: LidConfig) -> list[LidPlacement]:
-    r = cfg.apply_pct / 100.0
-    s = cfg.resolved_sizing() / 100.0
-    site = LID_TYPES[cfg.lid_type]["site"]
     out = []
-    for name in cfg.targets:
+    for name, t, apply_pct in cfg.items():
         sc = model.subcatchments.get(name)
+        r = apply_pct / 100.0
         if sc is None or r <= 0:
             continue
+        s = cfg.sizing_for(t) / 100.0
+        site = LID_TYPES[t]["site"]
         A = sc.area
         a_imp = A * sc.imperv / 100.0
         a_perv = A - a_imp
@@ -147,7 +194,7 @@ def plan_placements(model: Model, cfg: LidConfig) -> list[LidPlacement]:
             new_imp = (a_imp - L) / non_lid * 100.0
         new_w = sc.width * non_lid / A        # 흐름길이(면적÷폭) 유지
         out.append(LidPlacement(name, L, model.area_to_lid_units(L), r * a_imp,
-                                min(new_imp, 100.0), new_w, clipped))
+                                min(new_imp, 100.0), new_w, clipped, t, apply_pct))
     return out
 
 
@@ -158,14 +205,15 @@ def apply_lid(model: Model, inp: InpFile, cfg: LidConfig) -> list[LidPlacement]:
     placements = plan_placements(model, cfg)
     if not placements:
         return []
-    name = f"LID_{cfg.lid_type}"
-    inp.set_rows("LID_CONTROLS", lid_control_rows(model, cfg, name),
-                 comment="Name Type/Layer Parameters (웹앱이 생성)",
+    ctrl = []
+    for t in dict.fromkeys(p.lid_type for p in placements):
+        ctrl.extend(lid_control_rows(model, cfg, t))
+    inp.set_rows("LID_CONTROLS", ctrl, comment="Name Type/Layer Parameters (웹앱이 생성)",
                  after=["INFILTRATION", "SUBAREAS", "SUBCATCHMENTS"])
     usage = []
     for p in placements:
-        usage.append([p.subcatchment, name, 1, round(p.lid_area_unit, 2), 0, 0,
-                      round(cfg.apply_pct, 3), 0, "*", "*", 0])
+        usage.append([p.subcatchment, lid_name(p.lid_type), 1, round(p.lid_area_unit, 2), 0, 0,
+                      round(p.apply_pct, 3), 0, "*", "*", 0])
     inp.set_rows("LID_USAGE", usage,
                  comment="Subcatch LID Number Area Width InitSat FromImp ToPerv RptFile DrainTo FromPerv",
                  after=["LID_CONTROLS"])

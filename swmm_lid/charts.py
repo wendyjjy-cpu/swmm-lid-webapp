@@ -65,13 +65,68 @@ def _centroid(pts):
     return sum(xs) / len(xs), sum(ys) / len(ys)
 
 
+def _inside(x, y, pts) -> bool:
+    """점이 다각형 안에 있는지 (ray casting)."""
+    n, c = len(pts), False
+    for i in range(n):
+        x1, y1 = pts[i]
+        x2, y2 = pts[(i + 1) % n]
+        if (y1 > y) != (y2 > y):
+            xi = x1 + (y - y1) * (x2 - x1) / (y2 - y1)
+            if x < xi:
+                c = not c
+    return c
+
+
+def _edge_dist(x, y, pts) -> float:
+    best = float("inf")
+    n = len(pts)
+    for i in range(n):
+        x1, y1 = pts[i]
+        x2, y2 = pts[(i + 1) % n]
+        dx, dy = x2 - x1, y2 - y1
+        L2 = dx * dx + dy * dy
+        t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((x - x1) * dx + (y - y1) * dy) / L2))
+        px, py = x1 + t * dx, y1 + t * dy
+        best = min(best, math.hypot(x - px, y - py))
+    return best
+
+
+def label_point(pts, grid: int = 30):
+    """이름표 위치: 다각형 안쪽에서 경계로부터 가장 먼 점 (ㄴ자처럼 오목한 모양 대응)."""
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    best, best_d = _centroid(pts), -1.0
+    for i in range(grid + 1):
+        for j in range(grid + 1):
+            x = x0 + (x1 - x0) * i / grid
+            y = y0 + (y1 - y0) * j / grid
+            if _inside(x, y, pts):
+                d = _edge_dist(x, y, pts)
+                if d > best_d:
+                    best, best_d = (x, y), d
+    return best
+
+
+LID_COLORS = {  # 종류별 채우기·선 색
+    "BC": ("rgba(22,163,74,0.40)", "#15803d"),
+    "PP": ("rgba(37,99,235,0.35)", "#1d4ed8"),
+    "IT": ("rgba(217,119,6,0.40)", "#b45309"),
+}
+
+
 def network_map(model: Model, lid_subs: dict[str, float] | None = None,
                 link_values: dict[str, float] | None = None,
                 link_label: str = "최대유량/만관유량",
                 sub_values: dict[str, float] | None = None,
-                sub_label: str = "") -> go.Figure:
-    """소유역(다각형) + 관로 + 절점. lid_subs: {소유역: LID 면적(m²)}."""
+                sub_label: str = "",
+                lid_types: dict[str, str] | None = None,
+                type_labels: dict[str, str] | None = None) -> go.Figure:
+    """소유역(다각형) + 관로 + 절점. lid_subs: {소유역: LID 면적(m²)}, lid_types: {소유역: LID 코드}."""
     lid_subs = lid_subs or {}
+    lid_types = lid_types or {}
+    type_labels = type_labels or {}
     fig = go.Figure()
     # 소유역
     for name, pts in model.polygons.items():
@@ -85,16 +140,17 @@ def network_map(model: Model, lid_subs: dict[str, float] | None = None,
         if sc:
             hover += (f"<br>면적 {model.area_to_ha(sc.area):.2f} ha"
                       f"<br>불투수율 {sc.imperv:.1f}%<br>출구 {sc.outlet}")
+        t = lid_types.get(name, "BC")
         if has_lid:
-            hover += f"<br>LID 면적 {lid_subs[name]:.0f} m²"
+            hover += f"<br>LID {type_labels.get(t, t)} · 면적 {lid_subs[name]:.0f} m²"
         if sub_values and name in sub_values:
             hover += f"<br>{sub_label} {sub_values[name]:.2f}"
+        fill, edge = LID_COLORS.get(t, LID_COLORS["BC"]) if has_lid else ("rgba(148,163,184,0.18)", "#94a3b8")
         fig.add_trace(go.Scatter(
-            x=xs, y=ys, fill="toself", mode="lines",
-            fillcolor="rgba(22,163,74,0.35)" if has_lid else "rgba(148,163,184,0.18)",
-            line=dict(color="#15803d" if has_lid else "#94a3b8", width=1.2),
+            x=xs, y=ys, fill="toself", mode="lines", fillcolor=fill,
+            line=dict(color=edge, width=1.2),
             hoverinfo="text", text=hover, hoveron="fills", showlegend=False))
-        cx, cy = _centroid(pts)
+        cx, cy = label_point(pts)
         fig.add_trace(go.Scatter(x=[cx], y=[cy], mode="text", text=[name],
                                  textfont=dict(size=11, color="#334155"),
                                  hoverinfo="skip", showlegend=False))
@@ -125,9 +181,12 @@ def network_map(model: Model, lid_subs: dict[str, float] | None = None,
     fig.add_trace(go.Scatter(x=xs, y=ys, mode="markers", marker=dict(size=9, symbol=sym, color=col),
                              hoverinfo="text", text=txt, showlegend=False))
     # 범례용 더미
-    fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers",
-                             marker=dict(size=12, color="rgba(22,163,74,0.6)", symbol="square"),
-                             name="LID 적용 소유역"))
+    used = list(dict.fromkeys(lid_types.get(s_, "BC") for s_ in lid_subs))
+    for t in used:
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers",
+                                 marker=dict(size=12, color=LID_COLORS.get(t, LID_COLORS["BC"])[1],
+                                             symbol="square"),
+                                 name=type_labels.get(t, "LID 적용 소유역")))
     fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers",
                              marker=dict(size=12, color="rgba(148,163,184,0.5)", symbol="square"),
                              name="LID 미적용 소유역"))

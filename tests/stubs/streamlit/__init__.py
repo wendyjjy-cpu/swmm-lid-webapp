@@ -90,6 +90,11 @@ class _Widgets:
         v = self._ov(k.get("key", "data_editor"), None)
         if v is not None:
             import pandas as pd
+            if isinstance(v, dict):          # 열 이름 → 값 목록
+                out = df.copy()
+                for col, vals in v.items():
+                    out[col] = vals
+                return out
             return pd.DataFrame({df.columns[0]: v})
         return df.copy()
 
@@ -164,3 +169,16 @@ def _passthrough_decorator(*dargs, **dkw):
 
 cache_data = _passthrough_decorator
 cache_resource = _passthrough_decorator
+
+
+class _ColumnConfig:
+    @staticmethod
+    def SelectboxColumn(*a, **k):
+        return ("select", a, k)
+
+    @staticmethod
+    def NumberColumn(*a, **k):
+        return ("number", a, k)
+
+
+column_config = _ColumnConfig()

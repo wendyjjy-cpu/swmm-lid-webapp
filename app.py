@@ -18,6 +18,7 @@ from swmm_lid import (CLOG_LEVELS, DEFAULT_PARAMS, LID_TYPES, InpFile, LidConfig
                       load_model, native_seepage_mmhr, run_scenario)
 from swmm_lid import charts
 from swmm_lid.runner import SwmmError
+from swmm_lid.rain import DISTRIBUTIONS, design_hyetograph
 from swmm_lid.scenario import gauge_interval_min
 from swmm_lid.validation import (EXAMPLE4_TRENCH_C, compare_reports, lid_runoff_coeff,
                                  load_reference, metric_from_report, metric_label,
@@ -112,12 +113,26 @@ def storm_label(s):
 
 step_min = gauge_interval_min(model)
 rain_mode = st.sidebar.radio(
-    "강우 입력 방식", ["INP 설계강우", "총강우량 조정", "균등 강우", "직접 입력 (표)"],
-    help="INP 설계강우: 모형에 들어 있는 강우 / 총강우량 조정: 시간분포는 유지하고 총량만 변경 / "
-         "균등 강우: 총강우량과 지속시간 입력 / 직접 입력: 시간별 강우강도를 표에 입력")
+    "강우 입력 방식", ["INP 설계강우", "확률강우량 + 시간분포", "총강우량 조정", "직접 입력 (표)"],
+    help="INP 설계강우: 모형에 들어 있는 강우 / 확률강우량 + 시간분포: 총강우량·지속시간·Huff 분위로 "
+         "설계강우 생성 / 총강우량 조정: INP 강우의 시간분포는 유지하고 총량만 변경 / "
+         "직접 입력: 시간별 강우강도를 표에 입력")
 custom_rain = None
 if rain_mode == "INP 설계강우":
     storm = st.sidebar.selectbox("설계강우", storms, index=DEFAULT_STORM, format_func=storm_label)
+elif rain_mode == "확률강우량 + 시간분포":
+    total = st.sidebar.number_input(
+        "총강우량 (mm)", 1.0, 2000.0, 80.0, 5.0,
+        help="국가 확률강우량도나 홍수량 산정 자료에서 찾은 지점의 재현기간·지속시간별 확률강우량을 넣으세요.")
+    dur = st.sidebar.number_input(f"지속시간 (분, {step_min:.0f}분 단위)", float(step_min), 1440.0,
+                                  120.0, float(step_min))
+    dist = st.sidebar.selectbox(
+        "시간분포", list(DISTRIBUTIONS), index=2,
+        help="Huff(1990) 점강우 중앙값(50%) 곡선(ISWS Circular 173, 표 3). 국내 설계홍수량 산정에서는 "
+             "Huff 3분위를 주로 씁니다. 지점별 국내 분포를 쓰려면 '직접 입력'으로 넣으세요.")
+    n_steps = max(1, int(round(dur / step_min)))
+    custom_rain = [round(v, 4) for v in design_hyetograph(total, n_steps * step_min, step_min, dist)]
+    storm = f"{dist} {total:.0f}mm/{n_steps * step_min:.0f}분"
 elif rain_mode == "총강우량 조정":
     base_storm = st.sidebar.selectbox("시간분포를 가져올 설계강우", storms, index=DEFAULT_STORM,
                                       format_func=storm_label)
@@ -126,13 +141,6 @@ elif rain_mode == "총강우량 조정":
     total = st.sidebar.number_input("총강우량 (mm)", 1.0, 2000.0, float(round(base_depth, 1)), 5.0)
     custom_rain = [round(v * total / base_depth, 4) for v in base_vals] if base_depth > 0 else None
     storm = f"{base_storm}분포 {total:.0f}mm"
-elif rain_mode == "균등 강우":
-    total = st.sidebar.number_input("총강우량 (mm)", 1.0, 2000.0, 50.0, 5.0)
-    dur = st.sidebar.number_input(f"지속시간 (분, {step_min:.0f}분 단위)", float(step_min), 1440.0,
-                                  60.0, float(step_min))
-    n_steps = max(1, int(round(dur / step_min)))
-    custom_rain = [round(total / (n_steps * step_min / 60.0), 4)] * n_steps
-    storm = f"균등 {total:.0f}mm/{n_steps * step_min:.0f}분"
 else:
     base_storm = st.sidebar.selectbox("처음 값으로 쓸 설계강우", storms, index=DEFAULT_STORM,
                                       format_func=storm_label)
@@ -151,31 +159,76 @@ if custom_rain is not None:
 
 st.sidebar.markdown("---")
 lid_on = st.sidebar.toggle("LID 적용", value=True)
-lid_type = st.sidebar.radio("LID 종류", list(LID_TYPES), format_func=lambda k: LID_TYPES[k]["label"],
-                            disabled=not lid_on)
-apply_pct = st.sidebar.slider("적용률: LID로 처리하는 불투수면 비율 (%)", 0, 100, 50, 5,
-                              disabled=not lid_on)
+lid_mode = st.sidebar.radio("LID 설정 방식", ["한 종류 일괄 적용", "소유역별 설정 (혼합)"],
+                            disabled=not lid_on,
+                            help="소유역별 설정: 소유역마다 LID 종류와 적용률을 따로 정합니다.")
+mixed = lid_mode == "소유역별 설정 (혼합)"
 up_grp, down_grp = model.upstream_downstream_groups()
-place = st.sidebar.radio("배치 위치", ["전체 소유역", "상류 소유역", "하류 소유역", "직접 선택"],
-                         disabled=not lid_on,
-                         help="상류·하류는 각 소유역 출구에서 방류구까지 관로 길이로 나눕니다.")
 all_subs = list(model.subcatchments)
-if place == "전체 소유역":
-    targets = all_subs
-elif place == "상류 소유역":
-    targets = up_grp
-elif place == "하류 소유역":
-    targets = down_grp
+site_ha_all = model.area_to_ha(model.total_area())
+
+
+def group_note(grp):
+    a = sum(model.area_to_ha(model.subcatchments[s_].area) for s_ in grp)
+    return f"{', '.join(grp)} ({a:.2f} ha, 유역의 {a / site_ha_all * 100:.0f}%)"
+
+
+lid_type, apply_pct, targets, assign = "BC", 50.0, [], None
+if not mixed:
+    lid_type = st.sidebar.radio("LID 종류", list(LID_TYPES), format_func=lambda k: LID_TYPES[k]["label"],
+                                disabled=not lid_on)
+    apply_pct = st.sidebar.slider("적용률: LID로 처리하는 불투수면 비율 (%)", 0, 100, 50, 5,
+                                  disabled=not lid_on)
+    place = st.sidebar.radio("배치 위치", ["전체 소유역", "상류 소유역", "하류 소유역", "직접 선택"],
+                             disabled=not lid_on,
+                             help="상류·하류: 각 소유역 출구에서 방류구까지 관로를 따라 흐르는 거리가 긴 순서로 "
+                                  "줄 세워 절반으로 나눕니다(지도상 위치가 아님).")
+    if place == "전체 소유역":
+        targets = all_subs
+    elif place == "상류 소유역":
+        targets = up_grp
+    elif place == "하류 소유역":
+        targets = down_grp
+    else:
+        targets = st.sidebar.multiselect("LID를 넣을 소유역", all_subs, default=all_subs[:1],
+                                         disabled=not lid_on)
+    if lid_on and place != "직접 선택":
+        st.sidebar.caption("대상: " + group_note(targets))
 else:
-    targets = st.sidebar.multiselect("LID를 넣을 소유역", all_subs, default=all_subs[:1],
-                                     disabled=not lid_on)
-if lid_on and place != "직접 선택":
-    st.sidebar.caption("대상: " + ", ".join(targets))
+    LID_NAMES = {"없음": None, **{v["short"]: k for k, v in LID_TYPES.items()}}
+    # 처음 보는 예시: 상류 두 곳에 생태저류지·침투 트렌치, 불투수면이 있는 하류 한 곳에 투수성 포장
+    preset = {}
+    ups = [s_ for s_ in up_grp if model.subcatchments[s_].imperv > 0]
+    dns = [s_ for s_ in down_grp if model.subcatchments[s_].imperv > 0]
+    for s_, t_ in zip(ups[:2], ["BC", "IT"]):
+        preset[s_] = LID_TYPES[t_]["short"]
+    if dns:
+        preset[dns[0]] = LID_TYPES["PP"]["short"]
+    df_lid = pd.DataFrame([{
+        "소유역": s_, "면적(ha)": round(model.area_to_ha(model.subcatchments[s_].area), 2),
+        "불투수율(%)": model.subcatchments[s_].imperv, "LID 종류": preset.get(s_, "없음"),
+        "적용률(%)": 50} for s_ in all_subs])
+    st.sidebar.caption("표에서 소유역마다 LID 종류와 적용률(불투수면 유출 중 LID로 보내는 비율)을 고르세요.")
+    ed = st.sidebar.data_editor(
+        df_lid, hide_index=True, use_container_width=True, disabled=["소유역", "면적(ha)", "불투수율(%)"],
+        column_config={
+            "LID 종류": st.column_config.SelectboxColumn("LID 종류", options=list(LID_NAMES), required=True),
+            "적용률(%)": st.column_config.NumberColumn("적용률(%)", min_value=0, max_value=100, step=5)},
+        key="lid_assign_editor")
+    assign = {}
+    for _, row in ed.iterrows():
+        code = LID_NAMES.get(row["LID 종류"])
+        rate = pd.to_numeric(row["적용률(%)"], errors="coerce")
+        if code and rate == rate and float(rate) > 0:
+            assign[str(row["소유역"])] = [code, float(rate)]
+    zero = [s_ for s_ in assign if model.subcatchments[s_].imperv <= 0]
+    if zero:
+        st.sidebar.caption(f"불투수율이 0%인 {', '.join(zero)}에는 LID가 들어가지 않습니다(처리할 불투수면 유출이 없음).")
 
 clog_opts = list(CLOG_LEVELS) + ["직접 입력"]
 clog_sel = st.sidebar.select_slider("막힘 정도", options=clog_opts, value=clog_opts[0],
                                     disabled=not lid_on,
-                                    help="막힘을 투수·침투 능력 감소율로 표현합니다 (가정값).")
+                                    help="막힘을 투수·침투 능력 감소율로 표현합니다 (민감도 분석용 가정값).")
 if clog_sel == "직접 입력":
     clog_pct = float(st.sidebar.slider("투수능 감소율 (%)", 0, 99, 50, disabled=not lid_on))
 else:
@@ -183,34 +236,39 @@ else:
     st.sidebar.caption(f"투수·침투 능력 {clog_pct:.0f}% 감소")
 
 native = native_seepage_mmhr(model)
+sizing, params = None, None
 with st.sidebar.expander("고급 설정"):
-    sizing = st.number_input("LID 면적 비율 (처리 불투수면 대비, %)", 1.0, 100.0,
-                             float(LID_TYPES[lid_type]["sizing"]), 1.0, disabled=not lid_on)
     seep = st.number_input("원지반 침투율 (mm/hr)", 0.0, 500.0, float(round(native, 2)), 0.5,
                            help="기본값은 모형의 침투 매개변수(Horton 종기침투능 또는 Green-Ampt "
                                 "포화투수계수)의 면적가중 평균입니다.", disabled=not lid_on)
-    params = copy.deepcopy(DEFAULT_PARAMS[lid_type])
-    params["storage"]["thick_mm"] = st.number_input(
-        "저류층(쇄석층) 두께 (mm)", 50.0, 3000.0, float(params["storage"]["thick_mm"]), 50.0,
-        disabled=not lid_on)
-    if lid_type == "BC":
-        params["soil"]["ksat_mmhr"] = st.number_input(
-            "토양층 투수계수 (mm/hr)", 1.0, 500.0, float(params["soil"]["ksat_mmhr"]), 1.0,
+    if mixed:
+        st.caption("소유역별 설정에서는 LID 종류별 기본 설계값을 씁니다.")
+    else:
+        sizing = st.number_input("LID 면적 비율 (처리 불투수면 대비, %)", 1.0, 100.0,
+                                 float(LID_TYPES[lid_type]["sizing"]), 1.0, disabled=not lid_on)
+        params = copy.deepcopy(DEFAULT_PARAMS[lid_type])
+        params["storage"]["thick_mm"] = st.number_input(
+            "저류층(쇄석층) 두께 (mm)", 50.0, 3000.0, float(params["storage"]["thick_mm"]), 50.0,
             disabled=not lid_on)
-        params["surface"]["berm_mm"] = st.number_input(
-            "표면 저류 깊이 (mm)", 0.0, 600.0, float(params["surface"]["berm_mm"]), 10.0,
-            disabled=not lid_on)
-    if lid_type == "PP":
-        params["pavement"]["perm_mmhr"] = st.number_input(
-            "포장층 투수계수 (mm/hr)", 10.0, 50000.0, float(params["pavement"]["perm_mmhr"]), 100.0,
-            disabled=not lid_on)
+        if lid_type == "BC":
+            params["soil"]["ksat_mmhr"] = st.number_input(
+                "토양층 투수계수 (mm/hr)", 1.0, 500.0, float(params["soil"]["ksat_mmhr"]), 1.0,
+                disabled=not lid_on)
+            params["surface"]["berm_mm"] = st.number_input(
+                "표면 저류 깊이 (mm)", 0.0, 600.0, float(params["surface"]["berm_mm"]), 10.0,
+                disabled=not lid_on)
+        if lid_type == "PP":
+            params["pavement"]["perm_mmhr"] = st.number_input(
+                "포장층 투수계수 (mm/hr)", 10.0, 50000.0, float(params["pavement"]["perm_mmhr"]), 100.0,
+                disabled=not lid_on)
     routing_opt = st.selectbox("흐름 추적 방법", ["INP 설정 그대로", "STEADY", "KINWAVE", "DYNWAVE"],
                                help="STEADY: 정상류, KINWAVE: 운동파, DYNWAVE: 동역학파")
 routing = None if routing_opt == "INP 설정 그대로" else routing_opt
 
-lid_cfg = LidConfig(enabled=bool(lid_on and targets and apply_pct > 0), lid_type=lid_type,
-                    apply_pct=float(apply_pct), sizing_pct=float(sizing), targets=list(targets),
-                    clog_pct=float(clog_pct), params=params, seepage_mmhr=float(seep))
+lid_cfg = LidConfig(enabled=bool(lid_on), lid_type=lid_type, apply_pct=float(apply_pct),
+                    sizing_pct=float(sizing) if sizing is not None else None, targets=list(targets),
+                    clog_pct=float(clog_pct), params=params, seepage_mmhr=float(seep),
+                    assign=assign or None)
 cfg = ScenarioConfig(storm=storm, lid=lid_cfg, routing=routing, custom_rain=custom_rain)
 cfg_json = cfg_to_json(cfg)
 
@@ -277,7 +335,13 @@ with tab_dash:
                 delta=f"유역의 {k['lid_area_ha'] / site_ha * 100:.1f}%" if on else None,
                 delta_color="off")
     if on:
-        st.caption("작은 글씨의 변화량은 같은 강우·같은 흐름 추적 방법의 **LID 없음** 모의 대비입니다.")
+        st.caption("작은 글씨의 변화량은 같은 강우·같은 흐름 추적 방법의 **LID 없음** 모의 대비입니다. "
+                   f"LID 면적 1 ha당 유출량 저감 **{fmt(cmp['vol_red_m3_per_ha'], 0)} m³**, "
+                   f"첨두 저감 **{fmt(cmp['peak_red_lps_per_ha'], 0)} L/s** "
+                   "(배치·종류를 같은 LID 면적 기준으로 비교할 때 사용).")
+        if res.config.lid.is_mixed:
+            st.caption("혼합 배치: " + ", ".join(
+                f"{p.subcatchment} {LID_TYPES[p.lid_type]['short']} {p.apply_pct:.0f}%" for p in res.placements))
         if any(p.clipped for p in res.placements):
             st.info("일부 소유역은 설치 가능한 면적의 90%를 넘어 LID 면적을 줄여 넣었습니다.")
 
@@ -305,7 +369,10 @@ with tab_dash:
         lid_subs = {p.subcatchment: p.lid_area_unit * (0.092903 if model.us else 1.0)
                     for p in res.placements}
         if model.polygons or model.coords:
-            st.plotly_chart(charts.network_map(model, lid_subs, link_vals), use_container_width=True)
+            st.plotly_chart(charts.network_map(
+                model, lid_subs, link_vals,
+                lid_types={p.subcatchment: p.lid_type for p in res.placements},
+                type_labels={k_: v_["short"] for k_, v_ in LID_TYPES.items()}), use_container_width=True)
         else:
             st.info("INP에 좌표가 없어 지도를 그릴 수 없습니다.")
     with col_ts:
@@ -371,16 +438,23 @@ def variants(axis: str, cfg0: ScenarioConfig) -> list[ScenarioConfig]:
             c = copy.deepcopy(cfg0)
             c.lid.enabled, c.lid.lid_type = True, t
             c.lid.sizing_pct, c.lid.params = None, None
+            if c.lid.assign:          # 혼합 배치: 같은 소유역·적용률에 종류만 통일
+                c.lid.assign = {k_: [t, v_[1]] for k_, v_ in c.lid.assign.items()}
             out.append(c)
     elif axis == "적용률":
         for p in (25, 50, 75, 100):
-            c = copy.deepcopy(cfg0); c.lid.enabled = True; c.lid.apply_pct = float(p); out.append(c)
+            c = copy.deepcopy(cfg0); c.lid.enabled = True; c.lid.apply_pct = float(p)
+            if c.lid.assign:
+                c.lid.assign = {k_: [v_[0], float(p)] for k_, v_ in c.lid.assign.items()}
+            out.append(c)
     elif axis == "막힘 정도":
         for v in CLOG_LEVELS.values():
             c = copy.deepcopy(cfg0); c.lid.enabled = True; c.lid.clog_pct = float(v); out.append(c)
     elif axis == "배치 위치":
         for grp in (all_subs, up_grp, down_grp):
-            c = copy.deepcopy(cfg0); c.lid.enabled = True; c.lid.targets = list(grp); out.append(c)
+            c = copy.deepcopy(cfg0); c.lid.enabled = True; c.lid.targets = list(grp)
+            c.lid.assign = None       # 배치 비교는 한 종류 일괄 적용으로
+            out.append(c)
     elif axis == "설계강우":
         for s in storms:
             c = copy.deepcopy(cfg0); c.storm = s; c.custom_rain = None; out.append(c)
@@ -397,7 +471,9 @@ def add_saved(cfg_s: str, label: str | None = None):
     c = cfg_from_json(cfg_s)
     if label is None:
         label = c.label()
-        if c.lid.enabled and set(c.lid.targets) == set(up_grp) and up_grp != all_subs:
+        if c.lid.is_mixed:
+            pass
+        elif c.lid.enabled and set(c.lid.targets) == set(up_grp) and up_grp != all_subs:
             label += " (상류)"
         elif c.lid.enabled and set(c.lid.targets) == set(down_grp) and down_grp != all_subs:
             label += " (하류)"
@@ -437,14 +513,24 @@ with tab_cmp:
             cm = compare_to_baseline(r, bl)
             lc = r.config.lid
             on = bool(r.placements)
+            if not on:
+                lid_desc, rate = "없음", "0"
+            elif lc.is_mixed:
+                lid_desc = "혼합: " + ", ".join(
+                    f"{p.subcatchment} {LID_TYPES[p.lid_type]['short']}" for p in r.placements)
+                rate = "소유역별"
+            else:
+                lid_desc, rate = LID_TYPES[lc.lid_type]["short"], f"{lc.apply_pct:.0f}"
             rows.append({
                 "시나리오": it["label"], "설계강우": r.config.storm,
-                "LID": LID_TYPES[lc.lid_type]["short"] if on else "없음",
-                "적용률(%)": lc.apply_pct if on else 0, "소유역 수": len(r.placements),
+                "LID": lid_desc, "적용률(%)": rate, "소유역 수": len(r.placements),
+                "LID 면적(ha)": r.kpi["lid_area_ha"],
                 "막힘(%)": lc.clog_pct if on else 0,
                 "첨두유량(m³/s)": r.kpi["peak_flow_cms"], "첨두 저감률(%)": cm["peak_reduction_pct"] if on else 0.0,
                 "총유출량(m³)": r.kpi["outflow_vol_m3"], "유출량 저감률(%)": cm["volume_reduction_pct"] if on else 0.0,
                 "첨두 지연(분)": cm["peak_delay_min"] if on else 0.0,
+                "1 ha당 유출 저감(m³)": cm["vol_red_m3_per_ha"] if on else float("nan"),
+                "1 ha당 첨두 저감(L/s)": cm["peak_red_lps_per_ha"] if on else float("nan"),
                 "최대 통수능 사용률": r.kpi["max_capacity"], "월류 절점 수": r.kpi["flood_nodes"],
             })
             curves.append({"label": it["label"], "minutes": r.minutes, "values": r.outflow_cms})
@@ -575,11 +661,15 @@ with tab_model:
         "소유역": s.name, "출구": s.outlet, "면적(ha)": model.area_to_ha(s.area), "불투수율(%)": s.imperv,
         "폭": s.width, "경사(%)": s.slope, "방류구까지 관로 길이": dl.get(s.name)}
         for s in model.subcatchments.values()]).round(3), use_container_width=True, hide_index=True)
-    st.markdown(f"**LID 설계값: {LID_TYPES[lid_type]['label']}** (SI 단위, 막힘 적용 전)")
+    st.markdown("**LID 설계값** (SI 단위, 막힘 적용 전)")
     prm = []
-    for layer, vals in params.items():
-        for kk, vv in vals.items():
-            prm.append({"층": layer, "항목": kk, "값": "원지반 침투율 사용" if vv is None else vv})
+    show = [lid_type] if not mixed else list(LID_TYPES)
+    for t_ in show:
+        pv_ = params if (params is not None and not mixed) else DEFAULT_PARAMS[t_]
+        for layer, vals in pv_.items():
+            for kk, vv in vals.items():
+                prm.append({"LID": LID_TYPES[t_]["short"], "층": layer, "항목": kk,
+                            "값": "원지반 침투율 사용" if vv is None else vv})
     st.dataframe(pd.DataFrame(prm), hide_index=True)
 
 # =============================================================== 사용 안내

@@ -6,7 +6,9 @@ EPA SWMM 5.2 엔진을 웹에서 직접 구동해 **LID 종류·적용률·배�
 - 대상 모형: EPA SWMM 응용 매뉴얼(Applications Manual) Example 2 (`models/Example2-Post.inp`, 약 11.7 ha 주거 개발지 배수 관망)
 - 계산 엔진: EPA SWMM 5.2 (`swmm-toolkit` 패키지)
 - 화면: 모의조건 설정 → 모델 실행 → 결과 대시보드 → 시나리오 비교 → 검증
-- 강우 입력: 매뉴얼 설계강우(2·10·100년), 총강우량 조정, 균등 강우, 5분 간격 직접 입력
+- 강우 입력: 매뉴얼 설계강우(2·10·100년), 확률강우량 + Huff 1~4분위·균등 분포, 총강우량 조정, 5분 간격 직접 입력
+- LID 설정: 한 종류 일괄 적용(전체·상류·하류·직접 선택) 또는 소유역별 종류·적용률 혼합 배치
+- 비교 지표: 첨두·유출량 저감률, 첨두 지연, LID 면적 1 ha당 저감량
 
 ## 검증 결과 요약
 
@@ -26,6 +28,7 @@ swmm_lid/
   outfile.py            SWMM 이진 결과(.out) 판독
   report.py             SWMM 리포트(.rpt) 요약표 판독
   scenario.py           시나리오 실행과 KPI 계산
+  rain.py               설계강우 시간분포 (Huff 1990 점강우 중앙값 곡선)
   validation.py         기준 결과·GUI 리포트 비교
   charts.py             Plotly 그래프
 models/                 INP 파일
@@ -58,7 +61,8 @@ tests/                  자동 시험
 python -m unittest discover -s tests -v
 ```
 
-`tests/test_example2.py`는 매뉴얼 기준값 36개 재현, 정상류 100년 월류, 사용자 강우 기능을 시험합니다.
+`tests/test_example2.py`는 매뉴얼 기준값 36개 재현, 정상류 100년 월류, 사용자 강우 기능을,
+`tests/test_features.py`는 Huff 설계강우, LID 혼합 배치, 1 ha당 저감량, 지도 이름표 위치를 시험합니다.
 `tests/data/test_site.inp`는 자동 시험 전용 가상 모형입니다.
 
 ## 검증 방법
@@ -72,4 +76,5 @@ python -m unittest discover -s tests -v
 - Rossman, L. A., & Simon, M. A. (2022). *Storm Water Management Model User's Manual Version 5.2*. EPA/600/R-22/030.
 - Gironás, J., Roesner, L. A., & Davis, J. (2009). *Storm Water Management Model Applications Manual*. EPA/600/R-09/000.
 - swmm-toolkit (pyswmm 프로젝트): EPA SWMM 엔진의 파이썬 연결 패키지.
+- Huff, F. A. (1990). *Time Distributions of Heavy Rainstorms in Illinois*. Illinois State Water Survey Circular 173.
 - `models/Example2-Post.inp`는 위 응용 매뉴얼과 함께 EPA가 배포한 예제 입력 파일입니다.
